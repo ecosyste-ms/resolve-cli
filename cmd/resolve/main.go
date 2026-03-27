@@ -79,6 +79,7 @@ func main() {
 	if key != "" {
 		opts = append(opts, ecosystems.WithAPIKey(key))
 	}
+	opts = append(opts, ecosystems.WithFrom("resolve@ecosyste.ms"))
 	client, err := ecosystems.NewClient("resolve.ecosyste.ms/1.0", opts...)
 	if err != nil {
 		fatal("creating API client: %v", err)
