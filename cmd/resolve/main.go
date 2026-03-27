@@ -20,7 +20,7 @@ var purlTypeToManager = map[string]string{
 	"npm":       "npm",
 	"gem":       "bundler",
 	"cargo":     "cargo",
-	"pypi":      "pip",
+	"pypi":      "uv",
 	"golang":    "gomod",
 	"maven":     "maven",
 	"composer":  "composer",
