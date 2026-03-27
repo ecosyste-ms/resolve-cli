@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	ecosystems "github.com/ecosyste-ms/ecosystems-go"
-	"github.com/ecosyste-ms/ecosystems-go/packages"
+	"github.com/git-pkgs/registries"
+	_ "github.com/git-pkgs/registries/all"
 	"github.com/git-pkgs/resolve"
 	_ "github.com/git-pkgs/resolve/parsers"
 )
@@ -37,6 +37,26 @@ var purlTypeToManager = map[string]string{
 	"cocoapods": "cocoapods",
 }
 
+// registryToEcosystem maps common registry names to purl types.
+var registryToEcosystem = map[string]string{
+	"npmjs.org":             "npm",
+	"rubygems.org":          "gem",
+	"crates.io":             "cargo",
+	"pypi.org":              "pypi",
+	"proxy.golang.org":      "golang",
+	"repo1.maven.org":       "maven",
+	"packagist.org":         "composer",
+	"pub.dev":               "pub",
+	"hex.pm":                "hex",
+	"nuget.org":             "nuget",
+	"swiftpackageindex.com": "swift",
+	"clojars.org":           "clojars",
+	"hackage.haskell.org":   "hackage",
+	"anaconda.org":          "conda",
+	"cocoapods.org":         "cocoapods",
+	"conan.io":              "conan",
+}
+
 // flatResult holds a flat name->version map.
 type flatResult map[string]string
 
@@ -49,15 +69,13 @@ type treeDep struct {
 }
 
 func main() {
-	registry := flag.String("registry", "", "ecosyste.ms registry name (e.g. rubygems.org)")
+	registry := flag.String("registry", "", "registry name (e.g. rubygems.org)")
 	ecosystem := flag.String("ecosystem", "", "ecosystem/purl type (e.g. gem, npm, cargo)")
 	pkg := flag.String("package", "", "package name (required)")
 	version := flag.String("version", "", "version (default: latest)")
 	tree := flag.Bool("tree", false, "output dependency tree with PURLs")
-	before := flag.String("before", "", "only consider versions published before this date (ISO 8601)")
 	manager := flag.String("manager", "", "override package manager (e.g. uv instead of pip)")
 	timeout := flag.Int("timeout", 120, "timeout in seconds")
-	apiKey := flag.String("api-key", "", "ecosyste.ms API key (also reads ECOSYSTEMS_API_KEY env)")
 	flag.Parse()
 
 	if *pkg == "" {
@@ -70,84 +88,45 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeout)*time.Second)
 	defer cancel()
 
-	// Set up ecosyste.ms API client.
-	key := *apiKey
-	if key == "" {
-		key = os.Getenv("ECOSYSTEMS_API_KEY")
-	}
-	var opts []ecosystems.Option
-	if key != "" {
-		opts = append(opts, ecosystems.WithAPIKey(key))
-	}
-	opts = append(opts, ecosystems.WithFrom("resolve@ecosyste.ms"))
-	client, err := ecosystems.NewClient("resolve.ecosyste.ms/1.0", opts...)
-	if err != nil {
-		fatal("creating API client: %v", err)
+	// Determine the ecosystem and manager.
+	eco := *ecosystem
+	if eco == "" {
+		eco = registryToEcosystem[*registry]
+		if eco == "" {
+			fatal("unsupported registry: %s", *registry)
+		}
 	}
 
-	// Determine the manager and registry to use.
 	mgrName := *manager
-	registryName := *registry
-
-	if mgrName == "" || registryName == "" {
-		// Fetch registries from the API to map registry name <-> purl type.
-		registries, err := client.ListRegistries(ctx)
-		if err != nil {
-			fatal("fetching registries: %v", err)
-		}
-
-		if *ecosystem != "" && registryName == "" {
-			// Find the default registry for this purl type.
-			for _, reg := range registries {
-				if reg.PurlType == *ecosystem && reg.Default {
-					registryName = reg.Name
-					break
-				}
-			}
-			if registryName == "" {
-				// Fall back to first matching registry.
-				for _, reg := range registries {
-					if reg.PurlType == *ecosystem {
-						registryName = reg.Name
-						break
-					}
-				}
-			}
-			if registryName == "" {
-				fatal("no registry found for ecosystem %s", *ecosystem)
-			}
-		}
-
+	if mgrName == "" {
+		mgrName = purlTypeToManager[eco]
 		if mgrName == "" {
-			if *ecosystem != "" {
-				mgrName = purlTypeToManager[*ecosystem]
-			} else {
-				// Look up the purl type for this registry.
-				for _, reg := range registries {
-					if reg.Name == registryName {
-						mgrName = purlTypeToManager[reg.PurlType]
-						break
-					}
-				}
-			}
-			if mgrName == "" {
-				fatal("cannot determine package manager for registry %s", registryName)
-			}
+			fatal("unsupported ecosystem: %s", eco)
 		}
 	}
 
-	// Fetch version and its dependencies.
-	deps, err := fetchDeps(ctx, client, registryName, *pkg, *version, *before)
+	// Create registry client.
+	client := registries.DefaultClient()
+	reg, err := registries.New(eco, "", client)
+	if err != nil {
+		fatal("creating registry client: %v", err)
+	}
+
+	// Fetch dependencies.
+	deps, err := fetchDeps(ctx, reg, *pkg, *version)
 	if err != nil {
 		fatal("%v", err)
 	}
 
-	// Convert to InputDep format.
+	// Convert to InputDep format, filtering to runtime only.
 	var inputDeps []resolve.InputDep
 	for _, dep := range deps {
+		if dep.Scope != registries.Runtime {
+			continue
+		}
 		inputDeps = append(inputDeps, resolve.InputDep{
-			Name:    dep.PackageName,
-			Version: deref(dep.Requirements),
+			Name:    dep.Name,
+			Version: dep.Requirements,
 		})
 	}
 
@@ -185,74 +164,25 @@ func main() {
 	}
 }
 
-// fetchDeps fetches runtime dependencies for a package version from the ecosyste.ms API.
-func fetchDeps(ctx context.Context, client *ecosystems.Client, registry, pkg, version, before string) ([]packages.Dependency, error) {
-	if version != "" && version != ">= 0" {
-		ver, err := client.GetVersion(ctx, registry, pkg, version)
+// fetchDeps fetches runtime dependencies for a package version from the registry.
+func fetchDeps(ctx context.Context, reg registries.Registry, pkg, version string) ([]registries.Dependency, error) {
+	if version == "" || version == ">= 0" {
+		// Find the latest version.
+		latest, err := registries.FetchLatestVersion(ctx, reg, pkg)
 		if err != nil {
-			return nil, fmt.Errorf("fetching version %s@%s: %w", pkg, version, err)
+			return nil, fmt.Errorf("fetching latest version of %s: %w", pkg, err)
 		}
-		if ver == nil {
-			return nil, fmt.Errorf("version %s@%s not found", pkg, version)
+		if latest == nil {
+			return nil, fmt.Errorf("no versions found for %s", pkg)
 		}
-		return runtimeDeps(ver.Dependencies), nil
+		version = latest.Number
 	}
 
-	// No specific version: get all versions and pick the latest.
-	versions, err := client.GetAllVersions(ctx, registry, pkg)
+	deps, err := reg.FetchDependencies(ctx, pkg, version)
 	if err != nil {
-		return nil, fmt.Errorf("fetching versions for %s: %w", pkg, err)
+		return nil, fmt.Errorf("fetching deps for %s@%s: %w", pkg, version, err)
 	}
-	if len(versions) == 0 {
-		return nil, fmt.Errorf("no versions found for %s", pkg)
-	}
-
-	// Filter by before date if specified.
-	if before != "" {
-		beforeTime, err := time.Parse(time.RFC3339, before)
-		if err != nil {
-			beforeTime, err = time.Parse("2006-01-02", before)
-			if err != nil {
-				return nil, fmt.Errorf("invalid --before date: %w", err)
-			}
-		}
-		var filtered []packages.Version
-		for _, v := range versions {
-			if v.PublishedAt != nil {
-				pub, err := time.Parse(time.RFC3339, *v.PublishedAt)
-				if err == nil && pub.Before(beforeTime) {
-					filtered = append(filtered, v)
-				}
-			}
-		}
-		if len(filtered) == 0 {
-			return nil, fmt.Errorf("no versions of %s found before %s", pkg, before)
-		}
-		versions = filtered
-	}
-
-	latest := versions[0].Number
-
-	ver, err := client.GetVersion(ctx, registry, pkg, latest)
-	if err != nil {
-		return nil, fmt.Errorf("fetching version %s@%s: %w", pkg, latest, err)
-	}
-	if ver == nil {
-		return nil, fmt.Errorf("version %s@%s not found", pkg, latest)
-	}
-	return runtimeDeps(ver.Dependencies), nil
-}
-
-// runtimeDeps filters to only runtime dependencies.
-func runtimeDeps(deps []packages.Dependency) []packages.Dependency {
-	var runtime []packages.Dependency
-	for _, dep := range deps {
-		kind := deref(dep.Kind)
-		if kind == "" || strings.EqualFold(kind, "runtime") {
-			runtime = append(runtime, dep)
-		}
-	}
-	return runtime
+	return deps, nil
 }
 
 // toFlat converts a dependency tree to a flat name->version map.
@@ -292,7 +222,6 @@ func toTreeDeps(deps []*resolve.Dep) []*treeDep {
 }
 
 // filterTempProject removes the temporary project entry from results.
-// Some managers (uv, poetry) include the temp project itself in their output.
 func filterTempProject(deps []*resolve.Dep) []*resolve.Dep {
 	var filtered []*resolve.Dep
 	for _, dep := range deps {
@@ -302,13 +231,6 @@ func filterTempProject(deps []*resolve.Dep) []*resolve.Dep {
 		filtered = append(filtered, dep)
 	}
 	return filtered
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 func fatal(format string, args ...any) {
