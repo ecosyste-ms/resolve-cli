@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/ecosyste-ms/ecosystems-go v0.1.1
-	github.com/git-pkgs/resolve v0.1.2-0.20260327143952-326c4ebbf923
+	github.com/git-pkgs/resolve v0.1.2-0.20260327152332-8cfe901b5b42
 )
 
 require (

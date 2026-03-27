@@ -17,6 +17,12 @@ github.com/git-pkgs/resolve v0.1.2-0.20260327143226-d30d09235975 h1:xC6d6XN6yUz2
 github.com/git-pkgs/resolve v0.1.2-0.20260327143226-d30d09235975/go.mod h1:HGRt1zajENGbDqYJlHptWup0y5hNJ1fNMKQ03Qi3DSs=
 github.com/git-pkgs/resolve v0.1.2-0.20260327143952-326c4ebbf923 h1:EXS56bz88pCDqdHvFjQjkH1VdQDulepo0njXFuDL31s=
 github.com/git-pkgs/resolve v0.1.2-0.20260327143952-326c4ebbf923/go.mod h1:HGRt1zajENGbDqYJlHptWup0y5hNJ1fNMKQ03Qi3DSs=
+github.com/git-pkgs/resolve v0.1.2-0.20260327151703-ac82c74282d2 h1:sd2w+FVN+tGCk1TDpVfR78Dd+yf/zuV90FRbn59T0Ck=
+github.com/git-pkgs/resolve v0.1.2-0.20260327151703-ac82c74282d2/go.mod h1:HGRt1zajENGbDqYJlHptWup0y5hNJ1fNMKQ03Qi3DSs=
+github.com/git-pkgs/resolve v0.1.2-0.20260327152113-8a6461a353da h1:+fdssKehNE5hj7kswXCCsKSK+KYFNQjNJ1rIoyR9KS0=
+github.com/git-pkgs/resolve v0.1.2-0.20260327152113-8a6461a353da/go.mod h1:HGRt1zajENGbDqYJlHptWup0y5hNJ1fNMKQ03Qi3DSs=
+github.com/git-pkgs/resolve v0.1.2-0.20260327152332-8cfe901b5b42 h1:9t02X9z//YEX9cT/BrMZF0YUDs0UAsAkqpRo+eELF68=
+github.com/git-pkgs/resolve v0.1.2-0.20260327152332-8cfe901b5b42/go.mod h1:HGRt1zajENGbDqYJlHptWup0y5hNJ1fNMKQ03Qi3DSs=
 github.com/git-pkgs/vers v0.2.2 h1:42QkiIURhGN2wM8AuYYU+FbzS1YV6jmdGd1RiFp7gXs=
 github.com/git-pkgs/vers v0.2.2/go.mod h1:biTbSQK1qdbrsxDEKnqe3Jzclxz8vW6uDcwKjfUGcOo=
 github.com/google/uuid v1.5.0 h1:1p67kYwdtXjb0gL0BPiP1Av9wiZPo5A8z2cWkTZ+eyU=
