@@ -151,11 +151,24 @@ func main() {
 		})
 	}
 
+	// No deps to resolve: return empty result.
+	if len(inputDeps) == 0 {
+		if *tree {
+			fmt.Println("[]")
+		} else {
+			fmt.Println("{}")
+		}
+		os.Exit(0)
+	}
+
 	// Run resolution.
 	result, err := resolve.ResolveDeps(ctx, mgrName, inputDeps)
 	if err != nil {
 		fatal("resolution failed: %v", err)
 	}
+
+	// Filter out the temp project from results (shows up as "resolve-*").
+	result.Direct = filterTempProject(result.Direct)
 
 	// Format output.
 	var output any
@@ -276,6 +289,19 @@ func toTreeDeps(deps []*resolve.Dep) []*treeDep {
 		result = append(result, td)
 	}
 	return result
+}
+
+// filterTempProject removes the temporary project entry from results.
+// Some managers (uv, poetry) include the temp project itself in their output.
+func filterTempProject(deps []*resolve.Dep) []*resolve.Dep {
+	var filtered []*resolve.Dep
+	for _, dep := range deps {
+		if strings.HasPrefix(dep.Name, "resolve-") || strings.HasPrefix(dep.Name, "resolve_") {
+			continue
+		}
+		filtered = append(filtered, dep)
+	}
+	return filtered
 }
 
 func deref(s *string) string {
