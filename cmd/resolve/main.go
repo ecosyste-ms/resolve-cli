@@ -16,25 +16,24 @@ import (
 )
 
 // purlTypeToManager maps PURL types to their default package manager.
+// Excluded: hackage (no stack parser), helm (Chart.yaml deps need
+// repository URLs we don't have), cocoapods (pod install requires .xcodeproj).
 var purlTypeToManager = map[string]string{
-	"npm":       "npm",
-	"gem":       "bundler",
-	"cargo":     "cargo",
-	"pypi":      "uv",
-	"golang":    "gomod",
-	"maven":     "maven",
-	"composer":  "composer",
-	"pub":       "pub",
-	"hex":       "mix",
-	"nuget":     "nuget",
-	"swift":     "swift",
-	"clojars":   "lein",
-	"hackage":   "stack",
-	"conda":     "conda",
-	"deno":      "deno",
-	"helm":      "helm",
-	"conan":     "conan",
-	"cocoapods": "cocoapods",
+	"npm":      "npm",
+	"gem":      "bundler",
+	"cargo":    "cargo",
+	"pypi":     "uv",
+	"golang":   "gomod",
+	"maven":    "maven",
+	"composer": "composer",
+	"pub":      "pub",
+	"hex":      "mix",
+	"nuget":    "nuget",
+	"swift":    "swift",
+	"clojars":  "lein",
+	"conda":    "conda",
+	"deno":     "deno",
+	"conan":    "conan",
 }
 
 // registryToEcosystem maps common registry names to purl types.
@@ -51,9 +50,7 @@ var registryToEcosystem = map[string]string{
 	"nuget.org":             "nuget",
 	"swiftpackageindex.com": "swift",
 	"clojars.org":           "clojars",
-	"hackage.haskell.org":   "hackage",
 	"anaconda.org":          "conda",
-	"cocoapods.org":         "cocoapods",
 	"conan.io":              "conan",
 }
 
