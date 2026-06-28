@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/git-pkgs/registries v0.3.0
-	github.com/git-pkgs/resolve v0.2.0
+	github.com/git-pkgs/resolve v0.2.1
 )
 
 require (
