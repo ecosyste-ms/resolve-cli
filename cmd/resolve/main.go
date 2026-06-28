@@ -5,54 +5,20 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/git-pkgs/managers/definitions"
+	"github.com/git-pkgs/purl"
 	"github.com/git-pkgs/registries"
 	_ "github.com/git-pkgs/registries/all"
 	"github.com/git-pkgs/resolve"
 	_ "github.com/git-pkgs/resolve/parsers"
 )
 
-// purlTypeToManager maps PURL types to their default package manager.
-// Excluded: hackage (no stack parser), helm (Chart.yaml deps need
-// repository URLs we don't have), cocoapods (pod install requires .xcodeproj).
-var purlTypeToManager = map[string]string{
-	"npm":      "npm",
-	"gem":      "bundler",
-	"cargo":    "cargo",
-	"pypi":     "uv",
-	"golang":   "gomod",
-	"maven":    "maven",
-	"composer": "composer",
-	"pub":      "pub",
-	"hex":      "mix",
-	"nuget":    "nuget",
-	"swift":    "swift",
-	"clojars":  "lein",
-	"conda":    "conda",
-	"deno":     "deno",
-	"conan":    "conan",
-}
-
-// registryToEcosystem maps common registry names to purl types.
-var registryToEcosystem = map[string]string{
-	"npmjs.org":             "npm",
-	"rubygems.org":          "gem",
-	"crates.io":             "cargo",
-	"pypi.org":              "pypi",
-	"proxy.golang.org":      "golang",
-	"repo1.maven.org":       "maven",
-	"packagist.org":         "composer",
-	"pub.dev":               "pub",
-	"hex.pm":                "hex",
-	"nuget.org":             "nuget",
-	"swiftpackageindex.com": "swift",
-	"clojars.org":           "clojars",
-	"anaconda.org":          "conda",
-	"conan.io":              "conan",
-}
+const defaultTimeoutSeconds = 120
 
 // flatResult holds a flat name->version map.
 type flatResult map[string]string
@@ -72,7 +38,7 @@ func main() {
 	version := flag.String("version", "", "version (default: latest)")
 	tree := flag.Bool("tree", false, "output dependency tree with PURLs")
 	manager := flag.String("manager", "", "override package manager (e.g. uv instead of pip)")
-	timeout := flag.Int("timeout", 120, "timeout in seconds")
+	timeout := flag.Int("timeout", defaultTimeoutSeconds, "timeout in seconds")
 	flag.Parse()
 
 	if *pkg == "" {
@@ -85,26 +51,22 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeout)*time.Second)
 	defer cancel()
 
-	// Determine the ecosystem and manager.
-	eco := *ecosystem
-	if eco == "" {
-		eco = registryToEcosystem[*registry]
-		if eco == "" {
-			fatal("unsupported registry: %s", *registry)
-		}
+	purlType := derivePURLType(*ecosystem, *registry)
+	if purlType == "" {
+		fatal("could not determine ecosystem for registry %q", *registry)
 	}
 
 	mgrName := *manager
 	if mgrName == "" {
-		mgrName = purlTypeToManager[eco]
+		mgrName = defaultManager(purlType)
 		if mgrName == "" {
-			fatal("unsupported ecosystem: %s", eco)
+			fatal("no resolver available for ecosystem %q", purlType)
 		}
 	}
 
 	// Create registry client.
 	client := registries.DefaultClient()
-	reg, err := registries.New(eco, "", client)
+	reg, err := registries.New(purlType, "", client)
 	if err != nil {
 		fatal("creating registry client: %v", err)
 	}
@@ -134,7 +96,7 @@ func main() {
 		} else {
 			fmt.Println("{}")
 		}
-		os.Exit(0)
+		return
 	}
 
 	// Run resolution.
@@ -159,6 +121,98 @@ func main() {
 	if err := enc.Encode(output); err != nil {
 		fatal("encoding output: %v", err)
 	}
+}
+
+// derivePURLType returns the purl type for the given --ecosystem or --registry
+// flag. The --ecosystem value may be either a purl type or an ecosystem name;
+// both are normalised via purl.EcosystemToPURLType. Registry values (bare
+// hostnames or URLs) are matched against the default URL for each ecosystem
+// registered in git-pkgs/registries.
+func derivePURLType(ecosystem, registry string) string {
+	if ecosystem != "" {
+		return purl.EcosystemToPURLType(ecosystem)
+	}
+	host := hostOf(registry)
+	if host == "" {
+		return ""
+	}
+	for _, eco := range registries.SupportedEcosystems() {
+		if hostMatches(host, hostOf(registries.DefaultURL(eco))) {
+			return eco
+		}
+	}
+	return ""
+}
+
+// hostOf returns the hostname from a URL or bare host string.
+func hostOf(s string) string {
+	if s == "" {
+		return ""
+	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// hostMatches reports whether two hosts refer to the same registry, allowing
+// either side to be a subdomain of the other (e.g. npmjs.org matches
+// registry.npmjs.org).
+func hostMatches(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b || strings.HasSuffix(a, "."+b) || strings.HasSuffix(b, "."+a)
+}
+
+// defaultManager returns the package manager to use for a purl type when
+// --manager is not given. Candidates are manager definitions whose ecosystem
+// maps to purlType and which have a parser registered in git-pkgs/resolve.
+// When several qualify, the one whose name equals the purl type wins (npm,
+// maven, composer, cargo, ...); otherwise the lowest detection priority is
+// taken as the most generic tool, with name as a final tiebreak for
+// determinism.
+func defaultManager(purlType string) string {
+	defs, err := definitions.LoadEmbedded()
+	if err != nil {
+		return ""
+	}
+
+	resolvers := make(map[string]bool)
+	for _, m := range resolve.Managers() {
+		resolvers[m] = true
+	}
+
+	var best *definitions.Definition
+	for _, def := range defs {
+		if purl.EcosystemToPURLType(def.Ecosystem) != purlType {
+			continue
+		}
+		if !resolvers[def.Name] {
+			continue
+		}
+		if best == nil || preferManager(def, best, purlType) {
+			best = def
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.Name
+}
+
+func preferManager(a, b *definitions.Definition, purlType string) bool {
+	if (a.Name == purlType) != (b.Name == purlType) {
+		return a.Name == purlType
+	}
+	if a.Detection.Priority != b.Detection.Priority {
+		return a.Detection.Priority < b.Detection.Priority
+	}
+	return a.Name < b.Name
 }
 
 // fetchDeps fetches runtime dependencies for a package version from the registry.
